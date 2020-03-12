@@ -1,0 +1,14 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "clang",
+      "type": "shell",
+      "command": "clang -std=c99 -Wall -pedantic -o pa1 -g *.c",
+      "group": {
+        "kind": "build",
+        "isDefault": true
+      }
+    }
+  ]
+}

@@ -14,22 +14,50 @@
 #include "ipc.h"
 #include "pa1.h"
 
+FILE *EVENTS_LOG, *PIPES_LOG;
+
+void log_event(char *fmt) {
+  fprintf(EVENTS_LOG, "%s", fmt);
+  fflush(EVENTS_LOG);
+  printf("%s", fmt);
+}
+
+void log_pipe(int from, int to, int fd[]) {
+  fprintf(PIPES_LOG, "Open pipe %d -> %d [%d, %d]\n", from, to, fd[0], fd[1]);
+  fflush(PIPES_LOG);
+  printf("Open pipe %d -> %d [%d, %d]\n", from, to, fd[0], fd[1]);
+}
+
 int *create_pipes(int node_count) {
   int *pipes = (int *)malloc(node_count * node_count * 2 * sizeof(int));
-  int args[2];
+  int fd[2];
 
   for (int from = 0; from < node_count; from++) {
     for (int to = 0; to < node_count; to++) {
       if (from == to)
         continue;
 
-      pipe(args);
-      pipes[get_pipe_id(node_count, from, to, 0)] = args[0];
-      pipes[get_pipe_id(node_count, from, to, 1)] = args[1];
+      pipe(fd);
+      pipes[get_pipe_id(node_count, from, to, 0)] = fd[0];
+      pipes[get_pipe_id(node_count, from, to, 1)] = fd[1];
+
+      log_pipe(from, to, fd);
     }
   }
 
   return pipes;
+}
+
+void wait_all(Node *node, int s_type) {
+  Message input_message;
+  for (int sender_id = 1; sender_id < node->node_count; sender_id++) {
+    if (sender_id == node->id || sender_id)
+      continue;
+
+    if (receive(node, sender_id, &input_message) != 0 ||
+        input_message.s_header.s_type != STARTED)
+      sender_id--;
+  }
 }
 
 void create_children(int node_count, int *pipes) {
@@ -38,47 +66,59 @@ void create_children(int node_count, int *pipes) {
 
     if (pid == 0) {
       // Child process
-      printf("Child process. node_id: %d\n", node_id);
+      Node node;
+      node.id = node_id;
+      node.pipes = pipes;
+      node.node_count = node_count;
 
-      Node *node = malloc(sizeof(Node));
-      node->id = node_id;
-      node->pipes = pipes;
-      node->node_count = node_count;
+      char log_string[100];
+      sprintf(log_string, log_started_fmt, node_id, getpid(), getppid());
+      log_event(log_string);
 
-      char out_string[100];
-      sprintf(out_string, "message %d", node_id * 10);
+      Message start_message;
+      memcpy(start_message.s_payload, log_string, strlen(log_string));
+      start_message.s_header.s_payload_len = strlen(log_string);
+      start_message.s_header.s_type = STARTED;
 
-      Message *message = malloc(sizeof(Message));
-      memcpy(message->s_payload, out_string, strlen(out_string));
-      message->s_header.s_payload_len = strlen(out_string);
+      send_multicast(&node, &start_message);
 
-      send_multicast(node, message);
+      wait_all(&node, STARTED);
+      sprintf(log_string, log_received_all_started_fmt, node_id);
+      log_event(log_string);
 
-      Message *message2 = malloc(sizeof(Message));
-      receive(node, node_id == 1 ? 2 : 1, message2);
+      sprintf(log_string, log_done_fmt, node_id);
+      log_event(log_string);
 
-      printf("Message in node %d: %s\n", node_id, message2->s_payload);
+      Message done_message;
+      memcpy(done_message.s_payload, log_string, strlen(log_string));
+      done_message.s_header.s_payload_len = strlen(log_string);
+      done_message.s_header.s_type = DONE;
+
+      send_multicast(&node, &done_message);
+
+      wait_all(&node, DONE);
+      sprintf(log_string, log_received_all_done_fmt, node_id);
+      log_event(log_string);
 
       return;
-    } else {
-      // Main process
-      printf("Spawned process. PID: %d\n", pid);
     }
   }
 
-  Node *node = malloc(sizeof(Node));
-  node->id = 0;
-  node->pipes = pipes;
-  node->node_count = node_count;
+  // Main process
+  Node node;
+  node.id = 0;
+  node.pipes = pipes;
+  node.node_count = node_count;
 
-  Message *message = malloc(sizeof(Message));
-  receive_any(node, message);
+  char log_string[100];
 
-  printf("Message in main: %s\n", message->s_payload);
+  wait_all(&node, STARTED);
+  sprintf(log_string, log_received_all_started_fmt, 0);
+  log_event(log_string);
 
-  receive_any(node, message);
-
-  printf("Message in main: %s\n", message->s_payload);
+  wait_all(&node, DONE);
+  sprintf(log_string, log_received_all_done_fmt, 0);
+  log_event(log_string);
 
   wait(NULL);
 }
@@ -89,9 +129,22 @@ int main(int argc, char *argv[]) {
     exit(EXIT_FAILURE);
   }
 
-  uint8_t node_count = strtoul(optarg, NULL, 10);
-  printf("Nodes count: %d\n", node_count);
+  if ((EVENTS_LOG = fopen(events_log, "w")) == 0)
+    exit(EXIT_FAILURE);
+
+  if ((PIPES_LOG = fopen(pipes_log, "w")) == 0)
+    exit(EXIT_FAILURE);
+
+  int node_count = strtoul(optarg, NULL, 10);
+  printf("Nodes count: %d\n\n", node_count);
 
   int *pipes = create_pipes(node_count + 1);
+  printf("\nOpened all pipes\n\n");
+
   create_children(node_count + 1, pipes);
+
+  fclose(PIPES_LOG);
+  fclose(EVENTS_LOG);
+
+  exit(EXIT_SUCCESS);
 }

@@ -4,7 +4,11 @@
     "pa1.h": "c",
     "__locale": "c",
     "locale": "c",
-    "__node_handle": "c"
+    "__node_handle": "c",
+    "stdarg.h": "c",
+    "unistd.h": "c",
+    "internal.h": "c",
+    "banking.h": "c"
   },
   "lldb.displayFormat": "auto",
   "lldb.showDisassembly": "never",

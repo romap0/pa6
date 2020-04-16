@@ -1,0 +1,8 @@
+version: '3'
+
+services:
+  app:
+    image: gcc
+    working_dir: /app
+    volumes:
+      - ./:/app

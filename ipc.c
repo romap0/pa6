@@ -1,7 +1,8 @@
 #include "ipc.h"
 #include "common.h"
 #include "internal.h"
-#include "pa1.h"
+#include "pa2345.h"
+#include <errno.h>
 #include <stdio.h>
 #include <unistd.h>
 
@@ -64,11 +65,13 @@ int receive(void *self, local_id from, Message *msg) {
 
   int pipe = node->pipes[get_pipe_id(node->node_count, from, node->id, 0)];
 
-  if (read(pipe, &(msg->s_header), sizeof(MessageHeader)) == -1)
-    return -1;
+  while (read(pipe, &(msg->s_header), sizeof(MessageHeader)) < 0) {
+    // sleep(1);
+  }
 
-  if (read(pipe, msg->s_payload, msg->s_header.s_payload_len) == -1)
-    return -1;
+  while (read(pipe, msg->s_payload, msg->s_header.s_payload_len) < 0) {
+    // sleep(1);
+  }
 
   printf("(%d <- %d) %d\n", node->id, from, msg->s_header.s_type);
   return 0;

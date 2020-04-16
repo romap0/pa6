@@ -12,7 +12,9 @@
 #include "common.h"
 #include "internal.h"
 #include "ipc.h"
-#include "pa1.h"
+#include "pa2345.h"
+#include "common.h"
+#include "banking.h"
 
 FILE *EVENTS_LOG, *PIPES_LOG;
 
@@ -38,6 +40,8 @@ int *create_pipes(int node_count) {
         continue;
 
       pipe(fd);
+      fcntl(fd[0], F_SETFL, O_NONBLOCK);
+      fcntl(fd[1], F_SETFL, O_NONBLOCK);
       pipes[get_pipe_id(node_count, from, to, 0)] = fd[0];
       pipes[get_pipe_id(node_count, from, to, 1)] = fd[1];
 
@@ -98,7 +102,7 @@ void create_children(int node_count, int *pipes) {
       closeUnusedPipes(pipes, node_count, node_id);
 
       char log_string[100];
-      sprintf(log_string, log_started_fmt, node_id, getpid(), getppid());
+      sprintf(log_string, log_started_fmt, get_physical_time(), node_id, getpid(), getppid(), 0);
       log_event(log_string);
 
       Message start_message;
@@ -109,10 +113,10 @@ void create_children(int node_count, int *pipes) {
       send_multicast(&node, &start_message);
 
       wait_all(&node, STARTED);
-      sprintf(log_string, log_received_all_started_fmt, node_id);
+      sprintf(log_string, log_received_all_started_fmt, get_physical_time(), node_id);
       log_event(log_string);
 
-      sprintf(log_string, log_done_fmt, node_id);
+      sprintf(log_string, log_done_fmt, get_physical_time(), node_id, 0);
       log_event(log_string);
 
       Message done_message;
@@ -123,7 +127,7 @@ void create_children(int node_count, int *pipes) {
       send_multicast(&node, &done_message);
 
       wait_all(&node, DONE);
-      sprintf(log_string, log_received_all_done_fmt, node_id);
+      sprintf(log_string, log_received_all_done_fmt, get_physical_time(), node_id);
       log_event(log_string);
 
       return;
@@ -141,11 +145,11 @@ void create_children(int node_count, int *pipes) {
   char log_string[100];
 
   wait_all(&node, STARTED);
-  sprintf(log_string, log_received_all_started_fmt, 0);
+  sprintf(log_string, log_received_all_started_fmt, get_physical_time(), 0);
   log_event(log_string);
 
   wait_all(&node, DONE);
-  sprintf(log_string, log_received_all_done_fmt, 0);
+  sprintf(log_string, log_received_all_done_fmt, get_physical_time(), 0);
   log_event(log_string);
 
   for (int node_id = 1; node_id < node_count; node_id++) {

@@ -49,18 +49,20 @@ int *create_pipes(int node_count) {
 }
 
 void closeUnusedPipes(int *pipes, int node_count, int node_id) {
-  return;
+  // return;
   for (int i = 0; i < node_count; i++) {
-    if (i != node_id) {
-      for (int k = 0; k < node_count; k++) {
-        int pipe_id1 = get_pipe_id(node_count, i, k, 0);
-        if (pipes[pipe_id1] != 0) {
-          close(pipes[pipe_id1]);
+    for (int k = 0; k < node_count; k++) {
+      if (k != node_id) {
+        int pipe1 = pipes[get_pipe_id(node_count, i, k, 0)];
+        if (pipe1 != 0) {
+          close(pipe1);
         }
+      }
 
-        int pipe_id2 = get_pipe_id(node_count, i, k, 1);
-        if (pipes[pipe_id2] != 0) {
-          close(pipes[pipe_id2]);
+      if (i != node_id) {
+        int pipe2 = pipes[get_pipe_id(node_count, i, k, 1)];
+        if (pipe2 != 0) {
+          close(pipe2);
         }
       }
     }
@@ -77,7 +79,7 @@ void wait_all(Node *node, int s_type) {
     if (receive(node, sender_id, &input_message) != 0 ||
         input_message.s_header.s_type != s_type) {
       sender_id--;
-      printf("wrong type");
+      printf("wrong type\n");
     }
   }
 }

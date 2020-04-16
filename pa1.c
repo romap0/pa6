@@ -48,15 +48,37 @@ int *create_pipes(int node_count) {
   return pipes;
 }
 
+void closeUnusedPipes(int *pipes, int node_count, int node_id) {
+  return;
+  for (int i = 0; i < node_count; i++) {
+    if (i != node_id) {
+      for (int k = 0; k < node_count; k++) {
+        int pipe_id1 = get_pipe_id(node_count, i, k, 0);
+        if (pipes[pipe_id1] != 0) {
+          close(pipes[pipe_id1]);
+        }
+
+        int pipe_id2 = get_pipe_id(node_count, i, k, 1);
+        if (pipes[pipe_id2] != 0) {
+          close(pipes[pipe_id2]);
+        }
+      }
+    }
+  }
+}
+
 void wait_all(Node *node, int s_type) {
   Message input_message;
   for (int sender_id = 1; sender_id < node->node_count; sender_id++) {
-    if (sender_id == node->id || sender_id)
+    if (sender_id == node->id)
       continue;
 
+    printf("(%d <- %d) %d?\n", node->id, sender_id, s_type);
     if (receive(node, sender_id, &input_message) != 0 ||
-        input_message.s_header.s_type != STARTED)
+        input_message.s_header.s_type != s_type) {
       sender_id--;
+      printf("wrong type");
+    }
   }
 }
 
@@ -70,6 +92,8 @@ void create_children(int node_count, int *pipes) {
       node.id = node_id;
       node.pipes = pipes;
       node.node_count = node_count;
+
+      closeUnusedPipes(pipes, node_count, node_id);
 
       char log_string[100];
       sprintf(log_string, log_started_fmt, node_id, getpid(), getppid());
@@ -110,6 +134,8 @@ void create_children(int node_count, int *pipes) {
   node.pipes = pipes;
   node.node_count = node_count;
 
+  closeUnusedPipes(pipes, node_count, 0);
+
   char log_string[100];
 
   wait_all(&node, STARTED);
@@ -120,7 +146,9 @@ void create_children(int node_count, int *pipes) {
   sprintf(log_string, log_received_all_done_fmt, 0);
   log_event(log_string);
 
-  wait(NULL);
+  for (int node_id = 1; node_id < node_count; node_id++) {
+    wait(NULL);
+  }
 }
 
 int main(int argc, char *argv[]) {

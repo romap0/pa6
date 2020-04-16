@@ -2,6 +2,7 @@
 #include "common.h"
 #include "internal.h"
 #include "pa1.h"
+#include <stdio.h>
 #include <unistd.h>
 
 /** Send a message to the process specified by id.
@@ -16,6 +17,7 @@ int send(void *self, local_id dst, const Message *msg) {
   Node *node = (Node *)self;
   size_t message_len = sizeof(MessageHeader) + msg->s_header.s_payload_len;
   int pipe = node->pipes[get_pipe_id(node->node_count, node->id, dst, 1)];
+  printf("(%d -> %d) %d\n", node->id, dst, msg->s_header.s_type);
   return write(pipe, msg, message_len) == -1;
 }
 
@@ -62,7 +64,14 @@ int receive(void *self, local_id from, Message *msg) {
 
   int pipe = node->pipes[get_pipe_id(node->node_count, from, node->id, 0)];
 
-  return read(pipe, msg, MAX_MESSAGE_LEN) == -1;
+  if (read(pipe, &(msg->s_header), sizeof(MessageHeader)) == -1)
+    return -1;
+
+  if (read(pipe, msg->s_payload, msg->s_header.s_payload_len) == -1)
+    return -1;
+
+  printf("(%d <- %d) %d\n", node->id, from, msg->s_header.s_type);
+  return 0;
 }
 
 //------------------------------------------------------------------------------

@@ -92,12 +92,27 @@ int receive(void *self, local_id from, Message *msg) {
 int receive_any(void *self, Message *msg) {
   Node *node = (Node *)self;
 
-  for (int node_id = 0; node_id < node->node_count; node_id++) {
-    if (node_id == node->id)
-      continue;
+  while (1) {
+    for (int node_id = 0; node_id < node->node_count; node_id++) {
+      if (node_id == node->id)
+        continue;
 
-    if (receive(node, node_id, msg) == 0)
-      return 0;
+      int pipe =
+          node->pipes[get_pipe_id(node->node_count, node_id, node->id, 0)];
+
+      if (read(pipe, &(msg->s_header), sizeof(MessageHeader)) > 0) {
+        printf("(%d <- %d) %d!\n", node->id, node_id, msg->s_header.s_type);
+        while (1) {
+          if (read(pipe, msg->s_payload, msg->s_header.s_payload_len) >= 0) {
+            printf("(%d <- %d) %d!!\n", node->id, node_id,
+                   msg->s_header.s_type);
+            return 0;
+          }
+        }
+      }
+    }
+
+    // sleep(1);
   }
 
   return 1;

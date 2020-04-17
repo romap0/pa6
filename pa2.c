@@ -87,12 +87,12 @@ void wait_all(Node *node, int s_type) {
   }
 }
 
-void child_task(int node_id, int node_count, int *pipes) {
+void child_task(int node_id, int node_count, int *pipes, int balance) {
   Node node;
   node.id = node_id;
   node.pipes = pipes;
   node.node_count = node_count;
-  node.balance = 0;
+  node.balance = balance;
   node.physical_time = get_physical_time();
 
   closeUnusedPipes(pipes, node_count, node_id);
@@ -126,10 +126,13 @@ void child_task(int node_id, int node_count, int *pipes) {
           node_id);
   log_event(log_string);
 
-  uint16_t done = node_count - 1;
-
+  uint16_t done = node_count - 2;
+  // return;
   while (done) {
-    receive_any(&node, &received_message);
+    printf("before receive\n");
+    // while(1){}
+    int receive_result = receive_any(&node, &received_message);
+    printf("receive_result: %d\n", receive_result);
 
     switch (received_message.s_header.s_type) {
     case STOP:
@@ -145,9 +148,6 @@ void child_task(int node_id, int node_count, int *pipes) {
       sent_message.s_header.s_local_time = node.physical_time;
 
       send_multicast(&node, &sent_message);
-      // msg_print(id, MSG_STDOUT | MSG_EVENT | MSG_SENDALL, DONE,
-      // log_done_fmt, sent_message.s_header.s_local_time =
-      // get_physical_time(), id, balance);
       break;
 
     case DONE:
@@ -175,7 +175,7 @@ void child_task(int node_id, int node_count, int *pipes) {
         sent_message.s_header.s_payload_len =
             received_message.s_header.s_payload_len;
 
-        send(&node, 0, &sent_message);
+        // send(&node, 0, &sent_message);
         send(&node, transfer_order_received->s_dst, &sent_message);
         client_update_balance_history(
             &history, sent_message.s_header.s_local_time, node.balance);
@@ -202,6 +202,7 @@ void child_task(int node_id, int node_count, int *pipes) {
       }
       break;
     }
+    // sleep(1);
   }
 
   node.physical_time = get_physical_time();
@@ -225,37 +226,66 @@ void main_task(int node_count, int *pipes) {
   node.id = 0;
   node.pipes = pipes;
   node.node_count = node_count;
+  node.physical_time = get_physical_time();
+
+  Message sent_message;
+  Message received_message;
+
+  BalanceHistory *history = (BalanceHistory *)received_message.s_payload;
+  AllHistory all = {0};
 
   closeUnusedPipes(pipes, node_count, 0);
 
   char log_string[100];
 
   wait_all(&node, STARTED);
-  sprintf(log_string, log_received_all_started_fmt, get_physical_time(), 0);
+  sprintf(log_string, log_received_all_started_fmt, node.physical_time,
+          PARENT_ID);
   log_event(log_string);
+
+  bank_robbery(&node, node_count - 1);
+  // return;
+
+  node.physical_time = get_physical_time();
+
+  sent_message.s_header.s_type = STOP;
+  sent_message.s_header.s_local_time = node.physical_time;
+  sent_message.s_header.s_payload_len = 0;
+
+  send_multicast(&node, &sent_message);
 
   wait_all(&node, DONE);
   sprintf(log_string, log_received_all_done_fmt, get_physical_time(), 0);
   log_event(log_string);
+
+  for (int i = 1; i < node_count; i++) {
+    receive(&node, i, &received_message);
+    if (received_message.s_header.s_type == BALANCE_HISTORY) {
+      all.s_history_len++;
+      all.s_history[i - 1] = *history;
+    } else {
+      printf(">>>> ERROR: BALANCE_HISTORY %d\n",
+             received_message.s_header.s_type);
+    }
+  }
+
+  print_history(&all);
 
   for (int node_id = 1; node_id < node_count; node_id++) {
     wait(NULL);
   }
 }
 
-void create_children(int node_count, int *pipes) {
+void create_children(int node_count, int *pipes, char **argv) {
   for (int node_id = 1; node_id < node_count; node_id++) {
     pid_t pid = fork();
 
     if (pid == 0) {
       // Child process
-      child_task(node_id, node_count, pipes);
+      child_task(node_id, node_count, pipes, atoi(argv[optind + node_id - 1]));
       return;
     }
   }
-
-  // Main process
-  main_task(node_count, pipes);
 }
 
 int main(int argc, char *argv[]) {
@@ -273,10 +303,18 @@ int main(int argc, char *argv[]) {
   int node_count = strtoul(optarg, NULL, 10);
   printf("Nodes count: %d\n\n", node_count);
 
+  if (node_count > argc - optind) {
+    fprintf(stderr, "Initial balance is not specified\n");
+    exit(1);
+  }
+
   int *pipes = create_pipes(node_count + 1);
   printf("\nOpened all pipes\n\n");
 
-  create_children(node_count + 1, pipes);
+  create_children(node_count + 1, pipes, argv);
+
+  // Main process
+  main_task(node_count + 1, pipes);
 
   fclose(PIPES_LOG);
   fclose(EVENTS_LOG);

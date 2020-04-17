@@ -20,7 +20,7 @@
  * @param parent_data Any data structure implemented by students to perform I/O
  */
 void transfer(void *parent_data, local_id src, local_id dst, balance_t amount) {
-  local_id id = *(local_id *)parent_data;
+  Node *node = (Node *)parent_data;
 
   Message message;
   TransferOrder *transfer_order = (TransferOrder *)message.s_payload;
@@ -34,11 +34,11 @@ void transfer(void *parent_data, local_id src, local_id dst, balance_t amount) {
   transfer_order->s_dst = dst;
   transfer_order->s_amount = amount;
 
-  send(&id, src, &message);
+  send(node, src, &message);
 
   Message input_message;
 
-  if (receive(&id, dst, &input_message)) {
+  if (receive(node, dst, &input_message)) {
     printf("transfer(): receive() error\n");
     exit(1);
   }

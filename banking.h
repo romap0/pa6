@@ -71,9 +71,6 @@ typedef struct {
  */
 void transfer(void *parent_data, local_id src, local_id dst, balance_t amount);
 
-void client_update_balance_history(BalanceHistory *history,
-                                   timestamp_t local_time, balance_t balance);
-
 //------------------------------------------------------------------------------
 // Functions below are implemented by lector, test implementations are
 // provided to students for testing purposes

@@ -138,8 +138,7 @@ void child_task(int node_id, int node_count, int *pipes, int balance) {
     case STOP:
       node.physical_time = get_physical_time();
 
-      sprintf(log_string, log_done_fmt, node.physical_time, node_id, getpid(),
-              getppid(), node.balance);
+      sprintf(log_string, log_done_fmt, node.physical_time, node_id, node.balance);
       log_event(log_string);
 
       memcpy(sent_message.s_payload, log_string, strlen(log_string));

@@ -9,12 +9,11 @@
 #include <time.h>
 #include <unistd.h>
 
+#include "banking.h"
 #include "common.h"
 #include "internal.h"
 #include "ipc.h"
 #include "pa2345.h"
-#include "common.h"
-#include "banking.h"
 
 FILE *EVENTS_LOG, *PIPES_LOG;
 
@@ -88,53 +87,140 @@ void wait_all(Node *node, int s_type) {
   }
 }
 
-void create_children(int node_count, int *pipes) {
-  for (int node_id = 1; node_id < node_count; node_id++) {
-    pid_t pid = fork();
+void child_task(int node_id, int node_count, int *pipes) {
+  Node node;
+  node.id = node_id;
+  node.pipes = pipes;
+  node.node_count = node_count;
+  node.balance = 0;
+  node.physical_time = get_physical_time();
 
-    if (pid == 0) {
-      // Child process
-      Node node;
-      node.id = node_id;
-      node.pipes = pipes;
-      node.node_count = node_count;
+  closeUnusedPipes(pipes, node_count, node_id);
 
-      closeUnusedPipes(pipes, node_count, node_id);
+  Message sent_message;
+  Message received_message;
 
-      char log_string[100];
-      sprintf(log_string, log_started_fmt, get_physical_time(), node_id, getpid(), getppid(), 0);
+  TransferOrder *transfer_order_sent = (TransferOrder *)sent_message.s_payload;
+  TransferOrder *transfer_order_received =
+      (TransferOrder *)received_message.s_payload;
+
+  BalanceHistory history = {node_id, 1, {{node.balance, 0, 0}}};
+
+  char log_string[100];
+  sprintf(log_string, log_started_fmt, node.physical_time, node_id, getpid(),
+          getppid(), node.balance);
+  log_event(log_string);
+
+  Message start_message;
+  memcpy(start_message.s_payload, log_string, strlen(log_string));
+  start_message.s_header.s_payload_len = strlen(log_string);
+  start_message.s_header.s_type = STARTED;
+  start_message.s_header.s_local_time = node.physical_time;
+
+  send_multicast(&node, &start_message);
+  wait_all(&node, STARTED);
+
+  node.physical_time = get_physical_time();
+
+  sprintf(log_string, log_received_all_started_fmt, node.physical_time,
+          node_id);
+  log_event(log_string);
+
+  uint16_t done = node_count - 1;
+
+  while (done) {
+    receive_any(&node, &received_message);
+
+    switch (received_message.s_header.s_type) {
+    case STOP:
+      node.physical_time = get_physical_time();
+
+      sprintf(log_string, log_done_fmt, node.physical_time, node_id, getpid(),
+              getppid(), node.balance);
       log_event(log_string);
 
-      Message start_message;
-      memcpy(start_message.s_payload, log_string, strlen(log_string));
-      start_message.s_header.s_payload_len = strlen(log_string);
-      start_message.s_header.s_type = STARTED;
+      memcpy(sent_message.s_payload, log_string, strlen(log_string));
+      sent_message.s_header.s_payload_len = strlen(log_string);
+      sent_message.s_header.s_type = DONE;
+      sent_message.s_header.s_local_time = node.physical_time;
 
-      send_multicast(&node, &start_message);
+      send_multicast(&node, &sent_message);
+      // msg_print(id, MSG_STDOUT | MSG_EVENT | MSG_SENDALL, DONE,
+      // log_done_fmt, sent_message.s_header.s_local_time =
+      // get_physical_time(), id, balance);
+      break;
 
-      wait_all(&node, STARTED);
-      sprintf(log_string, log_received_all_started_fmt, get_physical_time(), node_id);
-      log_event(log_string);
+    case DONE:
+      done--;
+      break;
 
-      sprintf(log_string, log_done_fmt, get_physical_time(), node_id, 0);
-      log_event(log_string);
+    case TRANSFER:
+      if (node_id == transfer_order_received->s_src) {
+        node.balance -= transfer_order_received->s_amount;
 
-      Message done_message;
-      memcpy(done_message.s_payload, log_string, strlen(log_string));
-      done_message.s_header.s_payload_len = strlen(log_string);
-      done_message.s_header.s_type = DONE;
+        *transfer_order_sent = *transfer_order_received;
 
-      send_multicast(&node, &done_message);
+        node.physical_time = get_physical_time();
 
-      wait_all(&node, DONE);
-      sprintf(log_string, log_received_all_done_fmt, get_physical_time(), node_id);
-      log_event(log_string);
+        sprintf(log_string, log_transfer_out_fmt, node.physical_time, node_id,
+                transfer_order_received->s_amount,
+                transfer_order_received->s_dst);
+        log_event(log_string);
 
-      return;
+        memcpy(start_message.s_payload, log_string, strlen(log_string));
+        sent_message.s_header.s_local_time = node.physical_time;
+
+        sent_message.s_header.s_magic = MESSAGE_MAGIC;
+        sent_message.s_header.s_type = received_message.s_header.s_type;
+        sent_message.s_header.s_payload_len =
+            received_message.s_header.s_payload_len;
+
+        send(&node, 0, &sent_message);
+        send(&node, transfer_order_received->s_dst, &sent_message);
+        client_update_balance_history(
+            &history, sent_message.s_header.s_local_time, node.balance);
+      } else {
+        node.balance += transfer_order_received->s_amount;
+
+        node.physical_time = get_physical_time();
+
+        sprintf(log_string, log_transfer_in_fmt, node.physical_time, node_id,
+                transfer_order_received->s_amount,
+                transfer_order_received->s_dst);
+        log_event(log_string);
+
+        memcpy(start_message.s_payload, log_string, strlen(log_string));
+        sent_message.s_header.s_local_time = node.physical_time;
+
+        sent_message.s_header.s_type = ACK;
+        sent_message.s_header.s_payload_len = 0;
+
+        send(&node, 0, &sent_message);
+
+        client_update_balance_history(
+            &history, sent_message.s_header.s_local_time, node.balance);
+      }
+      break;
     }
   }
 
-  // Main process
+  node.physical_time = get_physical_time();
+
+  sprintf(log_string, log_received_all_done_fmt, node.physical_time, node_id);
+  log_event(log_string);
+
+  client_update_balance_history(&history, sent_message.s_header.s_local_time,
+                                node.balance);
+
+  node.physical_time = get_physical_time();
+  sent_message.s_header.s_type = BALANCE_HISTORY;
+  sent_message.s_header.s_local_time = node.physical_time;
+  sent_message.s_header.s_payload_len = (uint16_t)sizeof(history);
+  memcpy(sent_message.s_payload, &history, sizeof(history));
+  send(&node, PARENT_ID, &sent_message);
+}
+
+void main_task(int node_count, int *pipes) {
   Node node;
   node.id = 0;
   node.pipes = pipes;
@@ -155,6 +241,21 @@ void create_children(int node_count, int *pipes) {
   for (int node_id = 1; node_id < node_count; node_id++) {
     wait(NULL);
   }
+}
+
+void create_children(int node_count, int *pipes) {
+  for (int node_id = 1; node_id < node_count; node_id++) {
+    pid_t pid = fork();
+
+    if (pid == 0) {
+      // Child process
+      child_task(node_id, node_count, pipes);
+      return;
+    }
+  }
+
+  // Main process
+  main_task(node_count, pipes);
 }
 
 int main(int argc, char *argv[]) {

@@ -8,6 +8,8 @@ typedef struct {
   local_id id;
   int *pipes;
   int node_count;
+  int balance;
+  int physical_time;
 } Node;
 
 int get_pipe_id(int pipes_count, int from, int to, int is_write);

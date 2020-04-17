@@ -1,6 +1,7 @@
 /**
  * @file     banking.h
- * @Author   Michael Kosyakov and Evgeniy Ivanov (ifmo.distributedclass@gmail.com)
+ * @Author   Michael Kosyakov and Evgeniy Ivanov
+ * (ifmo.distributedclass@gmail.com)
  * @date     March, 2014
  * @brief    Definitions of data structures and functions related to banking
  *
@@ -21,23 +22,23 @@ typedef int16_t balance_t;
  * 4. s_dst sends ACK to "main process".
  */
 typedef struct {
-    local_id   s_src;           ///< transfer from process with this ID
-    local_id   s_dst;           ///< transfer to process with this ID
-    balance_t  s_amount;        ///< $$$
+  local_id s_src;     ///< transfer from process with this ID
+  local_id s_dst;     ///< transfer to process with this ID
+  balance_t s_amount; ///< $$$
 } __attribute__((packed)) TransferOrder;
 
 typedef struct {
-    balance_t   s_balance;
-    timestamp_t s_time;               ///< physical time in PA2 or Lamport's scalar
-                                      ///< time in PA3
-    balance_t   s_balance_pending_in; ///< $$$ sent at t <= s_time, but
-                                      ///< received at t > s_time. PA3 only,
-                                      ///< in other labs must be 0
+  balance_t s_balance;
+  timestamp_t s_time;             ///< physical time in PA2 or Lamport's scalar
+                                  ///< time in PA3
+  balance_t s_balance_pending_in; ///< $$$ sent at t <= s_time, but
+                                  ///< received at t > s_time. PA3 only,
+                                  ///< in other labs must be 0
 } __attribute__((packed)) BalanceState;
 
 enum {
-    MAX_T = 255 ///< max possible value of timestamp returned by get_lamport_time()
-                ///< or get_physical_time()
+  MAX_T = 255 ///< max possible value of timestamp returned by
+              ///< get_lamport_time() or get_physical_time()
 };
 
 /**
@@ -45,10 +46,10 @@ enum {
  * and t < s_history_len
  */
 typedef struct {
-    local_id        s_id;
-    uint8_t         s_history_len;
-    BalanceState    s_history[MAX_T + 1]; ///< Must be used as a buffer, unused
-                                          ///< part of array shouldn't be transfered
+  local_id s_id;
+  uint8_t s_history_len;
+  BalanceState s_history[MAX_T + 1]; ///< Must be used as a buffer, unused
+                                     ///< part of array shouldn't be transfered
 } __attribute__((packed)) BalanceHistory;
 
 /**
@@ -56,8 +57,8 @@ typedef struct {
  * except parrent process.
  */
 typedef struct {
-    uint8_t          s_history_len; ///< should be equal to the number of children
-    BalanceHistory   s_history[MAX_PROCESS_ID + 1];
+  uint8_t s_history_len; ///< should be equal to the number of children
+  BalanceHistory s_history[MAX_PROCESS_ID + 1];
 } AllHistory;
 
 //------------------------------------------------------------------------------
@@ -68,7 +69,10 @@ typedef struct {
  *
  * @param parent_data Any data structure implemented by students to perform I/O
  */
-void transfer(void * parent_data, local_id src, local_id dst, balance_t amount);
+void transfer(void *parent_data, local_id src, local_id dst, balance_t amount);
+
+void client_update_balance_history(BalanceHistory *history,
+                                   timestamp_t local_time, balance_t balance);
 
 //------------------------------------------------------------------------------
 // Functions below are implemented by lector, test implementations are
@@ -77,14 +81,14 @@ void transfer(void * parent_data, local_id src, local_id dst, balance_t amount);
 
 /** Perform a number of transfers between various children with ids [1;max_id]
  *
- * @param parent_data   Any data structure implemented by students to perform I/O,
- *                      will be passed to transfer()
- * @param max_id max    id of existing process, so that (max_id + 1) is the total
- *                      number of processes
+ * @param parent_data   Any data structure implemented by students to perform
+ * I/O, will be passed to transfer()
+ * @param max_id max    id of existing process, so that (max_id + 1) is the
+ * total number of processes
  */
-void bank_robbery(void * parent_data, local_id max_id);
+void bank_robbery(void *parent_data, local_id max_id);
 
-/** 
+/**
  * Returs the value of Lamport's clock.
  */
 timestamp_t get_lamport_time();
@@ -96,8 +100,8 @@ timestamp_t get_lamport_time();
 timestamp_t get_physical_time();
 
 /** Pretty print for BalanceHistories.
- * 
+ *
  */
-void print_history(const AllHistory * history);
+void print_history(const AllHistory *history);
 
 #endif // __IFMO_DISTRIBUTED_CLASS_BANKING__H

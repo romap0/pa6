@@ -101,11 +101,11 @@ int receive_any(void *self, Message *msg) {
           node->pipes[get_pipe_id(node->node_count, node_id, node->id, 0)];
 
       if (read(pipe, &(msg->s_header), sizeof(MessageHeader)) > 0) {
-        printf("(%d <- %d) %d!\n", node->id, node_id, msg->s_header.s_type);
+        // printf("(%d <- %d) %d!\n", node->id, node_id, msg->s_header.s_type);
         while (1) {
           if (read(pipe, msg->s_payload, msg->s_header.s_payload_len) >= 0) {
-            printf("(%d <- %d) %d!!\n", node->id, node_id,
-                   msg->s_header.s_type);
+            // printf("(%d <- %d) %d!!\n", node->id, node_id,
+            //        msg->s_header.s_type);
             return 0;
           }
         }

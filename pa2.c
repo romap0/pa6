@@ -98,6 +98,7 @@ void child_task(int node_id, int node_count, int *pipes, int balance) {
   closeUnusedPipes(pipes, node_count, node_id);
 
   Message sent_message;
+  sent_message.s_header.s_magic = MESSAGE_MAGIC;
   Message received_message;
 
   TransferOrder *transfer_order_sent = (TransferOrder *)sent_message.s_payload;
@@ -111,13 +112,12 @@ void child_task(int node_id, int node_count, int *pipes, int balance) {
           getppid(), node.balance);
   log_event(log_string);
 
-  Message start_message;
-  memcpy(start_message.s_payload, log_string, strlen(log_string));
-  start_message.s_header.s_payload_len = strlen(log_string);
-  start_message.s_header.s_type = STARTED;
-  start_message.s_header.s_local_time = node.physical_time;
+  memcpy(sent_message.s_payload, log_string, strlen(log_string));
+  sent_message.s_header.s_payload_len = strlen(log_string);
+  sent_message.s_header.s_type = STARTED;
+  sent_message.s_header.s_local_time = node.physical_time;
 
-  send_multicast(&node, &start_message);
+  send_multicast(&node, &sent_message);
   wait_all(&node, STARTED);
 
   node.physical_time = get_physical_time();
@@ -138,7 +138,8 @@ void child_task(int node_id, int node_count, int *pipes, int balance) {
     case STOP:
       node.physical_time = get_physical_time();
 
-      sprintf(log_string, log_done_fmt, node.physical_time, node_id, node.balance);
+      sprintf(log_string, log_done_fmt, node.physical_time, node_id,
+              node.balance);
       log_event(log_string);
 
       memcpy(sent_message.s_payload, log_string, strlen(log_string));
@@ -166,10 +167,9 @@ void child_task(int node_id, int node_count, int *pipes, int balance) {
                 transfer_order_received->s_dst);
         log_event(log_string);
 
-        memcpy(start_message.s_payload, log_string, strlen(log_string));
+        // memcpy(sent_message.s_payload, log_string, strlen(log_string));
         sent_message.s_header.s_local_time = node.physical_time;
 
-        sent_message.s_header.s_magic = MESSAGE_MAGIC;
         sent_message.s_header.s_type = received_message.s_header.s_type;
         sent_message.s_header.s_payload_len =
             received_message.s_header.s_payload_len;
@@ -188,7 +188,7 @@ void child_task(int node_id, int node_count, int *pipes, int balance) {
                 transfer_order_received->s_dst);
         log_event(log_string);
 
-        memcpy(start_message.s_payload, log_string, strlen(log_string));
+        // memcpy(sent_message.s_payload, log_string, strlen(log_string));
         sent_message.s_header.s_local_time = node.physical_time;
 
         sent_message.s_header.s_type = ACK;
@@ -228,6 +228,7 @@ void main_task(int node_count, int *pipes) {
   node.physical_time = get_physical_time();
 
   Message sent_message;
+  sent_message.s_header.s_magic = MESSAGE_MAGIC;
   Message received_message;
 
   BalanceHistory *history = (BalanceHistory *)received_message.s_payload;

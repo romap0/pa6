@@ -74,6 +74,7 @@ int receive(void *self, local_id from, Message *msg) {
   }
 
   printf("(%d <- %d) %d\n", node->id, from, msg->s_header.s_type);
+  set_lamport_time(msg->s_header.s_local_time);
   return 0;
 }
 
@@ -106,6 +107,7 @@ int receive_any(void *self, Message *msg) {
           if (read(pipe, msg->s_payload, msg->s_header.s_payload_len) >= 0) {
             // printf("(%d <- %d) %d!!\n", node->id, node_id,
             //        msg->s_header.s_type);
+            set_lamport_time(msg->s_header.s_local_time);
             return 0;
           }
         }

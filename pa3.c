@@ -93,7 +93,6 @@ void child_task(int node_id, int node_count, int *pipes, int balance) {
   node.pipes = pipes;
   node.node_count = node_count;
   node.balance = balance;
-  node.physical_time = get_physical_time();
 
   closeUnusedPipes(pipes, node_count, node_id);
 
@@ -107,22 +106,22 @@ void child_task(int node_id, int node_count, int *pipes, int balance) {
 
   BalanceHistory history = {node_id, 1, {{node.balance, 0, 0}}};
 
+  set_lamport_time(0);
+
   char log_string[100];
-  sprintf(log_string, log_started_fmt, node.physical_time, node_id, getpid(),
+  sprintf(log_string, log_started_fmt, get_lamport_time(), node_id, getpid(),
           getppid(), node.balance);
   log_event(log_string);
 
   memcpy(sent_message.s_payload, log_string, strlen(log_string));
   sent_message.s_header.s_payload_len = strlen(log_string);
   sent_message.s_header.s_type = STARTED;
-  sent_message.s_header.s_local_time = node.physical_time;
+  sent_message.s_header.s_local_time = get_lamport_time();
 
   send_multicast(&node, &sent_message);
   wait_all(&node, STARTED);
 
-  node.physical_time = get_physical_time();
-
-  sprintf(log_string, log_received_all_started_fmt, node.physical_time,
+  sprintf(log_string, log_received_all_started_fmt, get_lamport_time(),
           node_id);
   log_event(log_string);
 
@@ -136,16 +135,16 @@ void child_task(int node_id, int node_count, int *pipes, int balance) {
 
     switch (received_message.s_header.s_type) {
     case STOP:
-      node.physical_time = get_physical_time();
+      set_lamport_time(0);
 
-      sprintf(log_string, log_done_fmt, node.physical_time, node_id,
+      sprintf(log_string, log_done_fmt, get_lamport_time(), node_id,
               node.balance);
       log_event(log_string);
 
       memcpy(sent_message.s_payload, log_string, strlen(log_string));
       sent_message.s_header.s_payload_len = strlen(log_string);
       sent_message.s_header.s_type = DONE;
-      sent_message.s_header.s_local_time = node.physical_time;
+      sent_message.s_header.s_local_time = get_lamport_time();
 
       send_multicast(&node, &sent_message);
       break;
@@ -160,15 +159,15 @@ void child_task(int node_id, int node_count, int *pipes, int balance) {
 
         *transfer_order_sent = *transfer_order_received;
 
-        node.physical_time = get_physical_time();
+        set_lamport_time(0);
 
-        sprintf(log_string, log_transfer_out_fmt, node.physical_time, node_id,
+        sprintf(log_string, log_transfer_out_fmt, get_lamport_time(), node_id,
                 transfer_order_received->s_amount,
                 transfer_order_received->s_dst);
         log_event(log_string);
 
         // memcpy(sent_message.s_payload, log_string, strlen(log_string));
-        sent_message.s_header.s_local_time = node.physical_time;
+        sent_message.s_header.s_local_time = get_lamport_time();
 
         sent_message.s_header.s_type = received_message.s_header.s_type;
         sent_message.s_header.s_payload_len =
@@ -181,15 +180,15 @@ void child_task(int node_id, int node_count, int *pipes, int balance) {
       } else {
         node.balance += transfer_order_received->s_amount;
 
-        node.physical_time = get_physical_time();
+        set_lamport_time(0);
 
-        sprintf(log_string, log_transfer_in_fmt, node.physical_time, node_id,
+        sprintf(log_string, log_transfer_in_fmt, get_lamport_time(), node_id,
                 transfer_order_received->s_amount,
                 transfer_order_received->s_dst);
         log_event(log_string);
 
         // memcpy(sent_message.s_payload, log_string, strlen(log_string));
-        sent_message.s_header.s_local_time = node.physical_time;
+        sent_message.s_header.s_local_time = get_lamport_time();
 
         sent_message.s_header.s_type = ACK;
         sent_message.s_header.s_payload_len = 0;
@@ -204,17 +203,15 @@ void child_task(int node_id, int node_count, int *pipes, int balance) {
     // sleep(1);
   }
 
-  node.physical_time = get_physical_time();
-
-  sprintf(log_string, log_received_all_done_fmt, node.physical_time, node_id);
+  sprintf(log_string, log_received_all_done_fmt, get_lamport_time(), node_id);
   log_event(log_string);
 
   client_update_balance_history(&history, sent_message.s_header.s_local_time,
                                 node.balance);
 
-  node.physical_time = get_physical_time();
+  set_lamport_time(0);
   sent_message.s_header.s_type = BALANCE_HISTORY;
-  sent_message.s_header.s_local_time = node.physical_time;
+  sent_message.s_header.s_local_time = get_lamport_time();
   sent_message.s_header.s_payload_len = (uint16_t)sizeof(history);
   memcpy(sent_message.s_payload, &history, sizeof(history));
   send(&node, PARENT_ID, &sent_message);
@@ -225,7 +222,6 @@ void main_task(int node_count, int *pipes) {
   node.id = 0;
   node.pipes = pipes;
   node.node_count = node_count;
-  node.physical_time = get_physical_time();
 
   Message sent_message;
   sent_message.s_header.s_magic = MESSAGE_MAGIC;
@@ -239,23 +235,23 @@ void main_task(int node_count, int *pipes) {
   char log_string[100];
 
   wait_all(&node, STARTED);
-  sprintf(log_string, log_received_all_started_fmt, node.physical_time,
+  sprintf(log_string, log_received_all_started_fmt, get_lamport_time(),
           PARENT_ID);
   log_event(log_string);
 
   bank_robbery(&node, node_count - 1);
   // return;
 
-  node.physical_time = get_physical_time();
+  set_lamport_time(0);
 
   sent_message.s_header.s_type = STOP;
-  sent_message.s_header.s_local_time = node.physical_time;
+  sent_message.s_header.s_local_time = get_lamport_time();
   sent_message.s_header.s_payload_len = 0;
 
   send_multicast(&node, &sent_message);
 
   wait_all(&node, DONE);
-  sprintf(log_string, log_received_all_done_fmt, get_physical_time(), 0);
+  sprintf(log_string, log_received_all_done_fmt, get_lamport_time(), 0);
   log_event(log_string);
 
   for (int i = 1; i < node_count; i++) {

@@ -15,6 +15,8 @@
 #include "ipc.h"
 #include "pa2345.h"
 
+#define max(a, b) ((a) > (b) ? (a) : (b))
+
 /** Transfer amount from src to dst.
  *
  * @param parent_data Any data structure implemented by students to perform I/O
@@ -27,7 +29,7 @@ void transfer(void *parent_data, local_id src, local_id dst, balance_t amount) {
 
   message.s_header.s_magic = MESSAGE_MAGIC;
   message.s_header.s_type = TRANSFER;
-  message.s_header.s_local_time = get_physical_time();
+  message.s_header.s_local_time = set_lamport_time(0);
   message.s_header.s_payload_len = sizeof(TransferOrder);
 
   transfer_order->s_src = src;
@@ -52,18 +54,32 @@ void transfer(void *parent_data, local_id src, local_id dst, balance_t amount) {
 void client_update_balance_history(BalanceHistory *history,
                                    timestamp_t local_time, balance_t balance) {
   int i;
+  int pi = 0;
 
   for (i = history->s_history_len;
        history->s_history[i - 1].s_time < local_time - 1; i++) {
     history->s_history_len++;
     history->s_history[i] = history->s_history[i - 1];
     history->s_history[i].s_time++;
+    if (pi == 1)
+      history->s_history[i].s_balance_pending_in = 0;
+    else
+      pi++;
   }
-
   history->s_history[history->s_history_len].s_balance = balance;
   history->s_history[history->s_history_len].s_time = local_time;
-  history->s_history[history->s_history_len].s_balance_pending_in = 0;
+  history->s_history[history->s_history_len].s_balance_pending_in = max(
+      0, history->s_history[history->s_history_len - 1].s_balance - balance);
   history->s_history_len++;
+}
+
+timestamp_t ltime = 0;
+
+timestamp_t get_lamport_time(void) { return ltime; }
+
+int set_lamport_time(timestamp_t lt) {
+  ltime = max(ltime, lt) + 1;
+  return ltime;
 }
 
 //------------------------------------------------------------------------------

@@ -9,20 +9,14 @@
 #include <time.h>
 #include <unistd.h>
 
-#include "banking.h"
 #include "common.h"
 #include "internal.h"
 #include "ipc.h"
 #include "pa2345.h"
 
-typedef struct {
-  timestamp_t time;
-  int done;
-  int pending;
-} lqueue_t;
-
-lqueue_t lqueue[16];
 int mutexl = 0;
+ForkLock lock;
+int done_count = 0;
 
 FILE *EVENTS_LOG, *PIPES_LOG;
 
@@ -96,76 +90,63 @@ void wait_all(Node *node, int s_type) {
   }
 }
 
-int check_cs(void *self) {
-  Node *node = (Node *)self;
-  local_id i;
-  local_id id = 0;
-
-  for (i = 1; i <= node->node_count; i++) {
-    if (lqueue[i].pending) {
-      if (!id)
-        id = i;
-      else if (lqueue[i].time < lqueue[id].time)
-        id = i;
-    }
+int check_all_forks(const Node *node) {
+  for (int i = 1; i < node->node_count; i++) {
+    if (i == node->id)
+      continue;
+    if (lock.forks[i] == 0)
+      return 0;
   }
 
-  return id;
+  return 1;
 }
 
 int request_cs(const void *self) {
-  Message sent_message;
   Node *node = (Node *)self;
-  local_id repcnt = 0;
 
-  set_lamport_time(0);
-  sent_message.s_header.s_magic = MESSAGE_MAGIC;
-  sent_message.s_header.s_type = CS_REQUEST;
-  sent_message.s_header.s_local_time = get_lamport_time();
-  sent_message.s_header.s_payload_len = 0;
-
-  lqueue[node->id].time = sent_message.s_header.s_local_time;
-  lqueue[node->id].pending = 1;
-
-  send_multicast(node, &sent_message);
-
-  while (1) {
+  while (!check_all_forks(node)) {
+    Message sent_message;
     Message received_message;
+
+    set_lamport_time(0);
+    sent_message.s_header.s_magic = MESSAGE_MAGIC;
+    sent_message.s_header.s_type = CS_REQUEST;
+    sent_message.s_header.s_local_time = get_lamport_time();
+    sent_message.s_header.s_payload_len = 0;
+
+    for (int i = 1; i < node->node_count; i++) {
+      if (i == node->id)
+        continue;
+
+      if (lock.forks[i] == 0 && lock.reqf[i] == 1) {
+        send(node, i, &sent_message);
+        lock.reqf[i] = 0;
+      }
+    }
 
     receive_any(node, &received_message);
 
     switch (received_message.s_header.s_type) {
-    case CS_REQUEST:
-      lqueue[node->last_id].time = received_message.s_header.s_local_time;
-      lqueue[node->last_id].pending = 1;
-
-      set_lamport_time(0);
-
-      sent_message.s_header.s_magic = MESSAGE_MAGIC;
-      sent_message.s_header.s_type = CS_REPLY;
-      sent_message.s_header.s_local_time = get_lamport_time();
-      sent_message.s_header.s_payload_len = 0;
-
-      send(node, node->last_id, &sent_message);
-
-      break;
-
-    case CS_REPLY:
-      repcnt++;
-      if ((repcnt == node->node_count - 2) && check_cs(node) == node->id)
-        return 0;
-      break;
-
-    case CS_RELEASE:
-      lqueue[node->last_id].pending = 0;
-
-      if ((repcnt == node->node_count - 2) && check_cs(node) == node->id)
-        return 0;
-      break;
-
     case DONE:
-      printf("id = %d  DONE %d\n", node->id, node->last_id);
-      lqueue[node->last_id].done = 1;
+      done_count++;
+      break;
+    case CS_REQUEST:
+      lock.reqf[node->last_id] = 1;
+
+      if (lock.forks[node->last_id] && lock.dirty[node->last_id]) {
+        lock.forks[node->last_id] = lock.dirty[node->last_id] = 0;
+
+        set_lamport_time(0);
+        sent_message.s_header.s_magic = MESSAGE_MAGIC;
+        sent_message.s_header.s_type = CS_REPLY;
+        sent_message.s_header.s_local_time = get_lamport_time();
+        sent_message.s_header.s_payload_len = 0;
+        send(node, node->last_id, &sent_message);
+      }
+      break;
+    case CS_REPLY:
+      lock.forks[node->last_id] = 1;
+      lock.dirty[node->last_id] = 0;
       break;
     }
   }
@@ -179,26 +160,21 @@ int release_cs(const void *self) {
 
   set_lamport_time(0);
   sent_message.s_header.s_magic = MESSAGE_MAGIC;
-  sent_message.s_header.s_type = CS_RELEASE;
+  sent_message.s_header.s_type = CS_REPLY;
   sent_message.s_header.s_local_time = get_lamport_time();
   sent_message.s_header.s_payload_len = 0;
 
-  lqueue[node->id].pending = 0;
-  send_multicast(node, &sent_message);
-
-  return 0;
-}
-
-int check_done(void *self) {
-  Node *node = (Node *)self;
-  local_id i;
-
-  for (i = 1; i < node->node_count; i++) {
-    if (!lqueue[i].done)
-      return 0;
+  for (int n_id = 1; n_id < node->node_count; ++n_id) {
+    if (n_id == node->id)
+      continue;
+    lock.dirty[n_id] = 1;
+    if (lock.reqf[n_id] == 1) {
+      lock.forks[n_id] = 0;
+      send(node, n_id, &sent_message);
+    }
   }
 
-  return 1;
+  return 0;
 }
 
 void wait_all_done(void *self) {
@@ -206,36 +182,30 @@ void wait_all_done(void *self) {
   Message received_message;
   Node *node = (Node *)self;
 
-  lqueue[node->id].done = 1;
-
-  if (check_done(node))
-    return;
-
-  while (1) {
+  while (done_count < node->node_count - 2) {
     receive_any(node, &received_message);
 
     switch (received_message.s_header.s_type) {
-    case CS_REQUEST:
-
-      lqueue[node->last_id].time = received_message.s_header.s_local_time;
-      lqueue[node->last_id].pending = 1;
-
-      set_lamport_time(0);
-      sent_message.s_header.s_magic = MESSAGE_MAGIC;
-      sent_message.s_header.s_type = CS_REPLY;
-      sent_message.s_header.s_local_time = get_lamport_time();
-      sent_message.s_header.s_payload_len = 0;
-      send(node, node->last_id, &sent_message);
-
-      break;
-    case CS_RELEASE:
-      break;
-
     case DONE:
-      printf("id = %d  DONE %d\n", node->id, node->last_id);
-      lqueue[node->last_id].done = 1;
-      if (check_done(node))
-        return;
+      done_count++;
+      break;
+    case CS_REQUEST:
+      lock.reqf[node->last_id] = 1;
+
+      if (lock.forks[node->last_id] && lock.dirty[node->last_id]) {
+        lock.forks[node->last_id] = lock.dirty[node->last_id] = 0;
+
+        set_lamport_time(0);
+        sent_message.s_header.s_magic = MESSAGE_MAGIC;
+        sent_message.s_header.s_type = CS_REPLY;
+        sent_message.s_header.s_local_time = get_lamport_time();
+        sent_message.s_header.s_payload_len = 0;
+        send(node, node->last_id, &sent_message);
+      }
+      break;
+    case CS_REPLY:
+      lock.forks[node->last_id] = 1;
+      lock.dirty[node->last_id] = 0;
       break;
     }
   }
@@ -245,9 +215,6 @@ void wait_all_done(void *self) {
 
 void child_task(int node_id, int node_count, int *pipes, int mutexl) {
   Node node = {node_id, pipes, node_count};
-  // node.id = node_id;
-  // node.pipes = pipes;
-  // node.node_count = node_count;
 
   close_unused_pipes(pipes, node_count, node_id);
 
@@ -272,6 +239,14 @@ void child_task(int node_id, int node_count, int *pipes, int mutexl) {
   sprintf(log_string, log_received_all_started_fmt, get_lamport_time(),
           node_id);
   log_event(log_string);
+
+  for (int i = 1; i < node.node_count; i++) {
+    lock.forks[i] = lock.dirty[i] = lock.reqf[i] = 0;
+    if (node.id < i)
+      lock.forks[i] = lock.dirty[i] = 1;
+    if (node.id > i)
+      lock.reqf[i] = 1;
+  }
 
   for (int i = 1; i <= node_id * 5; i++) {
     sprintf(log_string, log_loop_operation_fmt, node_id, i, node_id * 5);
@@ -305,9 +280,6 @@ void child_task(int node_id, int node_count, int *pipes, int mutexl) {
 
 void main_task(int node_count, int *pipes) {
   Node node = {PARENT_ID, pipes, node_count};
-  // node.id = PARENT_ID;
-  // node.pipes = pipes;
-  // node.node_count = node_count;
 
   close_unused_pipes(pipes, node_count, 0);
 
@@ -317,7 +289,7 @@ void main_task(int node_count, int *pipes) {
   sprintf(log_string, log_received_all_started_fmt, get_lamport_time(),
           PARENT_ID);
   log_event(log_string);
-// sleep(10);
+  // sleep(10);
   wait_all(&node, DONE);
   sprintf(log_string, log_received_all_done_fmt, get_lamport_time(), 0);
   log_event(log_string);
